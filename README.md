@@ -7,15 +7,15 @@ not exposed to the general-purpose model.
 
 ## My Environment:
 This is customized to my home lab environment. I have a couple ubuntu servers running my containers, and one 
-beefier server that has a RTX3060 12GB card installed, which i call my 'aiserver'. All of the HA-LLM-Router components, 
-including the docker files and main code, were built from inputs i gave ChatGPT (plus), and I was pretty impressed 
+beefier server that has a RTX3060 12GB card installed, which I call my 'aiserver'. All of the HA-LLM-Router components, 
+including the docker files and main code, were built from inputs I gave ChatGPT (plus), and I was pretty impressed 
 with the results. This is the second version, as I found that the LLM originally made a lot of mistakes 
 and recently switched what models I used. I've also updated the way the router detects commands and intents 
 so that it uses smaller models for actions better, reduces the number of entities sent, and 
 can handle general purpose questions.
 
 Inside Home Assistant I do have the "Extended OpenAI Conversation" HACS component installed, so I can use the 
-HA-LLM-Router as my model. The latest version of the router allows you to customize (well, its hard coded in the 
+HA-LLM-Router as my model. The latest version of the router code allows you to customize (well, its hard coded in the 
 code itself...) the parameters used so in some sense it doesn't matter what you configure the integration 
 for, for Top P, Temperature, etc.
 
