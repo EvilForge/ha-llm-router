@@ -1,0 +1,140 @@
+---
+- name: Deploy Home Assistant LLM router to aiserver
+  hosts: ha-llm-router
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars:
+    ha_llm_router_src: >-
+      {{ playbook_dir }}/../files/ha-llm-router/{{ inventory_hostname }}/containers/volumes/ha-llm-router/
+    ha_llm_router_dest: /containers/volumes/ha-llm-router
+    ha_llm_router_compose_dir: /containers/config
+    ha_llm_router_compose_file: "{{ ha_llm_router_compose_dir }}/compose.yml"
+    ha_llm_router_service: ha-llm-router
+    ha_llm_router_health_url: http://127.0.0.1:8088/health
+
+  tasks:
+    - name: Check router source files on controller
+      ansible.builtin.stat:
+        path: "{{ ha_llm_router_src }}{{ item }}"
+      loop:
+        - Dockerfile
+        - requirements.txt
+        - app/main.py
+      delegate_to: localhost
+      become: false
+      register: ha_llm_router_source_files
+
+    - name: Fail if a required router source file is missing or empty
+      ansible.builtin.fail:
+        msg: >-
+          Required router source file is missing or empty:
+          {{ item.stat.path | default(item.item) }}
+      when: >-
+        not item.stat.exists or
+        not item.stat.isreg or
+        item.stat.size | int == 0
+      loop: "{{ ha_llm_router_source_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Ensure router build directory exists
+      ansible.builtin.file:
+        path: "{{ ha_llm_router_dest }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Sync router build context
+      ansible.posix.synchronize:
+        src: "{{ ha_llm_router_src }}"
+        dest: "{{ ha_llm_router_dest }}/"
+        recursive: true
+        delete: true
+        rsync_opts:
+          - "--exclude=.env"
+          - "--exclude=.venv/"
+          - "--exclude=__pycache__/"
+          - "--exclude=*.pyc"
+          - "--itemize-changes"
+
+    - name: Check server-managed router environment file
+      ansible.builtin.stat:
+        path: "{{ ha_llm_router_dest }}/.env"
+      register: ha_llm_router_env
+
+    - name: Fail if router environment file is missing or empty
+      ansible.builtin.fail:
+        msg: >-
+          {{ ha_llm_router_dest }}/.env is missing or empty. Create it on
+          {{ inventory_hostname }} with the router, Ollama, and Home Assistant
+          settings before deploying. This file is intentionally not stored in Git.
+      when: >-
+        not ha_llm_router_env.stat.exists or
+        not ha_llm_router_env.stat.isreg or
+        ha_llm_router_env.stat.size | int == 0
+
+    - name: Check Docker Compose file
+      ansible.builtin.stat:
+        path: "{{ ha_llm_router_compose_file }}"
+      register: ha_llm_router_compose
+
+    - name: Fail if Docker Compose file is missing or empty
+      ansible.builtin.fail:
+        msg: >-
+          {{ ha_llm_router_compose_file }} is missing or empty on
+          {{ inventory_hostname }}. Deploy the aiserver Docker Compose file first.
+      when: >-
+        not ha_llm_router_compose.stat.exists or
+        not ha_llm_router_compose.stat.isreg or
+        ha_llm_router_compose.stat.size | int == 0
+
+    - name: Validate router Compose service configuration
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ ha_llm_router_compose_file }}"
+          - config
+          - --quiet
+          - "{{ ha_llm_router_service }}"
+      changed_when: false
+
+    - name: Build and start router service
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ ha_llm_router_compose_file }}"
+          - up
+          - -d
+          - --build
+          - "{{ ha_llm_router_service }}"
+      register: ha_llm_router_compose_up
+      changed_when: true
+
+    - name: Wait for router health endpoint
+      ansible.builtin.uri:
+        url: "{{ ha_llm_router_health_url }}"
+        method: GET
+        return_content: true
+        status_code: 200
+      register: ha_llm_router_health
+      until: >-
+        ha_llm_router_health.status == 200 and
+        (ha_llm_router_health.json.ok | default(false) | bool)
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: Report successful router deployment
+      ansible.builtin.debug:
+        msg: >-
+          {{ ha_llm_router_service }} is running on {{ inventory_hostname }} and
+          {{ ha_llm_router_health_url }} returned {{ ha_llm_router_health.json }}.
